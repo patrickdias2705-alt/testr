@@ -1,0 +1,17 @@
+COMO USAR
+==========
+
+1. Se aparecer "npm nao encontrado":
+   - Baixe o Node.js em: https://nodejs.org
+   - Instale e marque a opcao "Add to PATH"
+   - Feche tudo e de dois cliques no INICIAR-SITE.bat de novo
+
+2. De DOIS CLIQUES no arquivo:  INICIAR-SITE.bat
+
+3. Espere aparecer no terminal: "Local: http://localhost:8080"
+
+4. Abra no navegador:  http://localhost:8080
+   (as vezes o navegador abre sozinho apos uns 10 segundos)
+
+5. No site: clique em um carro -> preencha o formulario -> "Pagar com PIX"
+   Deve abrir o QR Code do PIX.

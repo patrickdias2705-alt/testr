@@ -4,6 +4,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { Button } from "@/components/ui/button";
 import { createDeposit, type QrCodeResponse } from "@/lib/payment-api";
 import { toast } from "sonner";
+import { vehicles } from "@/data/vehicles";
 
 const formatCPF = (value: string) => {
   const digits = value.replace(/\D/g, "").slice(0, 11);
@@ -14,14 +15,20 @@ const formatCPF = (value: string) => {
 };
 
 const GerarPix = () => {
+  const [selectedSlug, setSelectedSlug] = useState<string>(vehicles[0]?.slug || "");
   const [amount, setAmount] = useState("");
   const [nome, setNome] = useState("");
   const [cpf, setCpf] = useState("");
   const [email, setEmail] = useState("");
   const [telefone, setTelefone] = useState("");
+  const [whatsDestino, setWhatsDestino] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sendingWhats, setSendingWhats] = useState(false);
   const [result, setResult] = useState<QrCodeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const selectedVehicle = vehicles.find((v) => v.slug === selectedSlug) || vehicles[0];
+  const mainPlan = selectedVehicle?.plans?.[0];
 
   const copyPix = () => {
     if (!result?.qrcode) return;
@@ -57,7 +64,7 @@ const GerarPix = () => {
     try {
       const res = await createDeposit({
         amount: valor,
-        external_id: `gerar-pix-${Date.now()}`,
+        external_id: `gerar-pix-${selectedVehicle?.slug || "sem-veiculo"}-${Date.now()}`,
         payer: {
           name: nome.trim(),
           document: doc,
@@ -75,6 +82,57 @@ const GerarPix = () => {
     }
   };
 
+  const handleSendWhats = async () => {
+    if (!result?.qrcode) {
+      toast.error("Gere o PIX antes de enviar no WhatsApp.");
+      return;
+    }
+    const phone = whatsDestino.replace(/\D/g, "");
+    if (!phone || phone.length < 10) {
+      toast.error("Informe um número de WhatsApp válido com DDD.");
+      return;
+    }
+    setSendingWhats(true);
+    try {
+      let imageUrl: string | undefined;
+      if (selectedVehicle?.coverImage && typeof window !== "undefined") {
+        try {
+          imageUrl = new URL(selectedVehicle.coverImage, window.location.origin).toString();
+        } catch {
+          imageUrl = undefined;
+        }
+      }
+      const total = result.amount
+        ? `R$ ${result.amount.toFixed(2).replace(".", ",")}`
+        : mainPlan?.total || "";
+      const body = {
+        phone: `55${phone}`, // Brasil
+        vehicleName: selectedVehicle?.name,
+        caucao: selectedVehicle?.caucao,
+        weekly: mainPlan?.weekly,
+        total,
+        qrcode: result.qrcode,
+        imageUrl,
+      };
+      const res = await fetch("/api/whatsapp/send-pix", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = typeof data?.error === "string" ? data.error : "Erro ao enviar mensagem no WhatsApp.";
+        toast.error(msg);
+        return;
+      }
+      toast.success("Mensagem enviada no WhatsApp!");
+    } catch (err) {
+      toast.error("Erro inesperado ao enviar WhatsApp.");
+    } finally {
+      setSendingWhats(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background w-full overflow-x-hidden flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-md">
@@ -83,10 +141,24 @@ const GerarPix = () => {
           Gerar PIX (copia e cola)
         </h1>
         <p className="text-muted-foreground text-sm mb-6">
-          Qualquer valor. Só quem tem este link pode usar.
+          Escolha o carro, gere o PIX e envie uma mensagem personalizada no WhatsApp. Só quem tem este link pode usar.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4 mb-6">
+          <div>
+            <label className="text-sm text-muted-foreground block mb-1">Veículo</label>
+            <select
+              value={selectedSlug}
+              onChange={(e) => setSelectedSlug(e.target.value)}
+              className="w-full rounded-lg border border-border bg-card px-4 py-3 text-foreground font-body text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+            >
+              {vehicles.map((v) => (
+                <option key={v.slug} value={v.slug}>
+                  {v.name}
+                </option>
+              ))}
+            </select>
+          </div>
           <div>
             <label className="text-sm text-muted-foreground block mb-1">Valor (R$)</label>
             <input
@@ -167,6 +239,26 @@ const GerarPix = () => {
               <Copy className="w-4 h-4" />
               Copiar código PIX (copia e cola)
             </Button>
+            <div className="space-y-2 pt-2 border-t border-border">
+              <label className="text-sm text-muted-foreground block mb-1">
+                Enviar mensagem no WhatsApp para:
+              </label>
+              <input
+                type="text"
+                value={whatsDestino}
+                onChange={(e) => setWhatsDestino(e.target.value)}
+                placeholder="DDD + número (ex: 11999999999)"
+                className="w-full rounded-lg border border-border bg-card px-4 py-3 text-foreground font-body text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+              />
+              <Button
+                type="button"
+                onClick={handleSendWhats}
+                disabled={sendingWhats}
+                className="w-full"
+              >
+                {sendingWhats ? "Enviando..." : "Enviar mensagem com PIX no WhatsApp"}
+              </Button>
+            </div>
             <p className="text-xs text-muted-foreground">
               Cole no app do banco para pagar. Status: {result.status}.
             </p>

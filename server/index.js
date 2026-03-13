@@ -12,7 +12,15 @@ app.use(cors({ origin: true }));
 app.use(express.json());
 
 const PAGLOOP_BASE = "https://api.pagloop.tech";
-const { PAGLOOP_CLIENT_ID, PAGLOOP_CLIENT_SECRET, CALLBACK_BASE_URL, CALLBACK_URL_OVERRIDE } = process.env;
+const {
+  PAGLOOP_CLIENT_ID,
+  PAGLOOP_CLIENT_SECRET,
+  CALLBACK_BASE_URL,
+  CALLBACK_URL_OVERRIDE,
+  EVOLUTION_API_URL,
+  EVOLUTION_INSTANCE_ID,
+  EVOLUTION_API_KEY,
+} = process.env;
 
 function getCallbackUrlForApi() {
   if (CALLBACK_URL_OVERRIDE) return CALLBACK_URL_OVERRIDE.trim();
@@ -200,6 +208,81 @@ app.get("/api/payments/test-deposit", async (req, res) => {
     return res.json({ ok: true, message: "Depósito de teste criado.", data });
   } catch (e) {
     const msg = (e && (e.message || e.toString())) || "Erro inesperado";
+    return res.status(500).json({ error: msg });
+  }
+});
+
+// Envio de mensagem WhatsApp com botão de copiar PIX
+app.post("/api/whatsapp/send-pix", async (req, res) => {
+  try {
+    const { phone, vehicleName, caucao, weekly, total, qrcode, imageUrl } = req.body || {};
+
+    if (!phone || !vehicleName || !qrcode || !total) {
+      return res.status(400).json({
+        error: "Campos obrigatórios: phone, vehicleName, qrcode, total.",
+      });
+    }
+
+    if (!EVOLUTION_API_URL || !EVOLUTION_INSTANCE_ID || !EVOLUTION_API_KEY) {
+      return res.status(500).json({
+        error: "EVOLUTION_API_URL, EVOLUTION_INSTANCE_ID ou EVOLUTION_API_KEY faltando no .env.",
+      });
+    }
+
+    const url = `${EVOLUTION_API_URL.replace(/\/$/, "")}/message/sendButtons/${EVOLUTION_INSTANCE_ID}`;
+
+    const title = `🚗 ${vehicleName} — Confirme sua locação!`;
+    const description =
+      `Olá! 👋\n\nSeu veículo ${vehicleName} está reservado. Confira os detalhes da locação:\n\n` +
+      (caucao ? `💳 Caução: ${caucao}\n` : "") +
+      (weekly ? `💰 Valor semanal: ${weekly}\n` : "") +
+      `\n💵 Total para retirada: ${total}\n\n` +
+      `Para confirmar sua locação, utilize o botão abaixo para copiar o código PIX e realizar o pagamento.\n\n` +
+      `Após o pagamento, envie o comprovante neste mesmo número.`;
+
+    const body = {
+      number: String(phone),
+      title,
+      description,
+      footer: "Locar Lima - Segurança e Praticidade",
+      thumbnailUrl: imageUrl || undefined,
+      buttons: [
+        {
+          type: "copy",
+          displayText: "Copiar Pix Copia e Cola",
+          copyCode: qrcode,
+        },
+      ],
+    };
+
+    const evoRes = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: EVOLUTION_API_KEY,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const evoRaw = await evoRes.text();
+    let evoData;
+    try {
+      evoData = evoRaw ? JSON.parse(evoRaw) : {};
+    } catch {
+      evoData = { raw: evoRaw };
+    }
+
+    if (!evoRes.ok) {
+      return res.status(evoRes.status).json({
+        error: "Erro ao enviar mensagem no WhatsApp.",
+        evolutionResponse: evoData,
+      });
+    }
+
+    return res.json({ ok: true, response: evoData });
+  } catch (e) {
+    const msg = e?.message || e?.toString() || "Erro inesperado ao enviar WhatsApp.";
+    console.error("[WhatsApp] ERRO:", msg);
     return res.status(500).json({ error: msg });
   }
 });

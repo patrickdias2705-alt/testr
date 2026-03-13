@@ -30,6 +30,8 @@ function parsePlanTotal(totalStr: string): number {
   return Math.round(parseFloat(cleaned || "0") * 100) / 100;
 }
 
+const OFFICIAL_WHATSAPP = "5511986608416";
+
 const VehicleDetail = () => {
   const { slug } = useParams();
   const vehicle = vehicles.find((v) => v.slug === slug);
@@ -47,10 +49,23 @@ const VehicleDetail = () => {
   const [pixResult, setPixResult] = useState<QrCodeResponse | null>(null);
   const [pixDialogOpen, setPixDialogOpen] = useState(false);
   const [pixError, setPixError] = useState<string | null>(null);
+  const [paymentUnlocked, setPaymentUnlocked] = useState(false);
 
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [slug]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const digits = formData.whatsapp.replace(/\D/g, "");
+    if (digits.length < 10) return;
+    const key = `locarlima_docs_enviados_${digits}`;
+    if (window.localStorage.getItem(key) === "1") {
+      setPaymentUnlocked(true);
+    } else {
+      setPaymentUnlocked(false);
+    }
+  }, [formData.whatsapp]);
 
   if (!vehicle) {
     return (
@@ -104,12 +119,56 @@ const VehicleDetail = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    validateForm();
+  };
+
+  const handleSendDocsToWhatsApp = () => {
     if (!validateForm()) return;
-    setShowPhoneDropdown(true);
+    const digits = formData.whatsapp.replace(/\D/g, "");
+    if (digits.length < 10) {
+      toast.error("Informe um WhatsApp válido para continuar.");
+      return;
+    }
+
+    const randomIndex = Math.floor(Math.random() * WHATSAPP_NUMBERS.length);
+    const selected = WHATSAPP_NUMBERS[randomIndex];
+
+    const message = encodeURIComponent(
+      `Olá! Fiz meu cadastro no site da Locar Lima e quero enviar meus documentos para análise do veículo ${vehicle?.name}.\n\n` +
+        `Meus dados:\n` +
+        `Nome: ${formData.nome}\n` +
+        `CPF: ${formData.cpf}\n` +
+        `E-mail: ${formData.email}\n` +
+        `WhatsApp: ${formData.whatsapp}\n\n` +
+        `Documentos que vou enviar por aqui:\n` +
+        `1️⃣ Foto da CNH (aberta e legível)\n` +
+        `2️⃣ Comprovante de endereço (até 3 meses)\n` +
+        `3️⃣ Print do app (Uber/99) com minha foto, quantidade de corridas e estrelas\n` +
+        `4️⃣ Foto da frente da residência mostrando a garagem (parte interna e externa)\n` +
+        `5️⃣ Certidão de Pontuação da CNH (site do Detran)\n\n` +
+        `Após a análise, por favor me retorne por aqui.`
+    );
+
+    window.open(`https://wa.me/${selected.url}?text=${message}`, "_blank");
+
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(`locarlima_docs_enviados_${digits}`, "1");
+      }
+    } catch {
+      // ignore storage errors
+    }
+
+    setPaymentUnlocked(true);
+    toast.success("Abrindo o WhatsApp para você enviar os documentos.");
   };
 
   const handleGeneratePix = async () => {
     if (!vehicle || !validateForm()) return;
+    if (!paymentUnlocked) {
+      toast.error("Envie primeiro seus documentos no WhatsApp para liberar o pagamento via PIX.");
+      return;
+    }
     const plan: VehiclePlan = vehicle.plans[selectedPlanIndex];
     const amount = parsePlanTotal(plan.total);
     if (amount <= 0) {
@@ -154,7 +213,7 @@ const VehicleDetail = () => {
   const handlePhoneSelect = (phoneUrl: string) => {
     setSubmitting(true);
     const message = encodeURIComponent(
-      `Olá! Tenho interesse no ${vehicle?.name}.\n\nNome: ${formData.nome}\nCPF: ${formData.cpf}\nE-mail: ${formData.email}\nWhatsApp: ${formData.whatsapp}`
+      `Olá! Tenho interesse no ${vehicle?.name}.\n\nNome: ${formData.nome}\nCPF: ${formData.cpf}\nE-mail: ${formData.email}\nWhatsApp: ${formData.whatsapp}\n\nJá enviei meus documentos pelo site e gostaria de saber sobre a análise.`
     );
     window.open(`https://wa.me/${phoneUrl}?text=${message}`, "_blank");
     toast.success("Redirecionando para o WhatsApp...");
@@ -333,43 +392,72 @@ const VehicleDetail = () => {
                       placeholder="(11) 99999-9999"
                     />
                   </div>
-                  <div className="flex flex-col gap-3">
-                    <Button
-                      type="button"
-                      onClick={handleGeneratePix}
-                      disabled={pixLoading || submitting}
-                      className="w-full py-6 rounded-full font-heading font-bold uppercase text-sm bg-primary text-primary-foreground hover:shadow-cyan transition-all flex items-center justify-center gap-2"
-                    >
-                      <QrCode className="w-5 h-5" />
-                      {pixLoading ? "Gerando PIX..." : "Pagar com PIX"}
-                    </Button>
-                    <div className="relative">
-                    <Button
-                      type="submit"
-                      variant="outline"
-                      disabled={submitting}
-                      className="w-full py-5 rounded-full font-heading font-bold uppercase text-sm border-2 border-primary text-primary hover:bg-primary/10 transition-all"
-                    >
-                      <Phone className="w-4 h-4" />
-                      {submitting ? "Abrindo..." : "Falar no WhatsApp"}
-                    </Button>
-                    {showPhoneDropdown && (
-                      <div className="absolute bottom-full left-0 right-0 mb-2 bg-navy-deep border border-border rounded-xl shadow-lg overflow-hidden z-10">
-                        <p className="px-4 py-2 text-xs text-muted-foreground border-b border-border">Escolha um número:</p>
-                        {WHATSAPP_NUMBERS.map((num) => (
-                          <button
-                            key={num.url}
-                            type="button"
-                            onClick={() => handlePhoneSelect(num.url)}
-                            className="w-full px-4 py-3 text-left text-sm text-foreground hover:bg-primary/10 transition-colors font-body flex items-center gap-2"
-                          >
-                            <Phone className="w-4 h-4 text-primary" />
-                            {num.label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                  {/* Documentos para análise */}
+                  <div className="mt-4 space-y-3">
+                    <h4 className="font-heading font-semibold text-sm text-foreground">
+                      Envio de documentos para análise
+                    </h4>
+                    <p className="text-xs text-muted-foreground">
+                      Antes de liberar o pagamento via PIX, você precisa enviar os documentos abaixo para um de nossos
+                      consultores no WhatsApp. Clique no botão para ser redirecionado:
+                    </p>
+                    <ul className="text-xs text-foreground list-disc list-inside space-y-1">
+                      <li>1️⃣ Foto da CNH (aberta e legível)</li>
+                      <li>2️⃣ Comprovante de endereço (até 3 meses)</li>
+                      <li>3️⃣ Print do app (Uber/99) com sua foto, quantidade de corridas e estrelas</li>
+                      <li>4️⃣ Foto da frente da residência mostrando a garagem (parte interna e externa)</li>
+                      <li>5️⃣ Certidão de Pontuação da CNH (site do Detran)</li>
+                      <li>
+                        6️⃣ Seu e-mail para envio do contrato:&nbsp;
+                        <span className="font-semibold">
+                          {formData.email || "preencha seu e-mail acima"}
+                        </span>
+                      </li>
+                    </ul>
                   </div>
+                  <div className="flex flex-col gap-3 pt-2">
+                    {!paymentUnlocked && (
+                      <Button
+                        type="button"
+                        onClick={handleSendDocsToWhatsApp}
+                        disabled={submitting}
+                        className="w-full py-5 rounded-full font-heading font-bold uppercase text-sm bg-primary text-primary-foreground hover:shadow-cyan transition-all"
+                      >
+                        Enviar documentos para análise no WhatsApp
+                      </Button>
+                    )}
+                    {paymentUnlocked && (
+                      <>
+                        <Button
+                          type="button"
+                          onClick={handleGeneratePix}
+                          disabled={pixLoading || submitting}
+                          className="w-full py-6 rounded-full font-heading font-bold uppercase text-sm bg-primary text-primary-foreground hover:shadow-cyan transition-all flex items-center justify-center gap-2"
+                        >
+                          <QrCode className="w-5 h-5" />
+                          {pixLoading ? "Gerando PIX..." : "Pagar com PIX"}
+                        </Button>
+                        <p className="text-[11px] text-muted-foreground text-center">
+                          Após realizar o pagamento, envie o comprovante no nosso WhatsApp oficial.
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() =>
+                            window.open(
+                              `https://wa.me/${OFFICIAL_WHATSAPP}?text=${encodeURIComponent(
+                                "Olá! Fiz o pagamento do PIX da locação e estou enviando o comprovante."
+                              )}`,
+                              "_blank"
+                            )
+                          }
+                          className="w-full py-4 rounded-full font-heading font-bold uppercase text-sm border-2 border-primary text-primary hover:bg-primary/10 transition-all flex items-center justify-center gap-2"
+                        >
+                          <Phone className="w-4 h-4" />
+                          Enviar comprovante no WhatsApp oficial
+                        </Button>
+                      </>
+                    )}
                   </div>
                   {pixError && (
                     <div className="mt-3 p-3 rounded-lg bg-destructive/15 border border-destructive/50 text-sm text-destructive">

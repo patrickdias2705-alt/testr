@@ -17,9 +17,9 @@ export default async function handler(req, res) {
     const body = typeof req.body === "object" ? req.body : {};
     const { amount, external_id, payer } = body || {};
 
-    if (!amount || !external_id || !payer?.name || !payer?.document || !payer?.email) {
+    if (!amount || Number(amount) <= 0) {
       return res.status(400).json({
-        error: "Campos obrigatórios: amount, external_id, payer (name, document, email)",
+        error: "Informe um valor válido (amount).",
       });
     }
 
@@ -31,17 +31,27 @@ export default async function handler(req, res) {
     }
 
     const token = await getToken();
+    const amountNum = Number(amount);
+    const externalId = external_id ? String(external_id) : `pix-${Date.now()}`;
+    const payerData =
+      payer?.name && payer?.document && payer?.email
+        ? {
+            name: payer.name,
+            document: String(payer.document).replace(/\D/g, ""),
+            email: payer.email,
+            ...(payer.phone && { phone: String(payer.phone).replace(/\D/g, "") }),
+          }
+        : {
+            name: "Cliente PIX",
+            document: "00000000191",
+            email: "pix@cliente.local",
+          };
 
     const payload = {
-      amount: Number(amount),
-      external_id: String(external_id),
+      amount: amountNum,
+      external_id: externalId,
       clientCallbackUrl,
-      payer: {
-        name: payer.name,
-        document: String(payer.document).replace(/\D/g, ""),
-        email: payer.email,
-        ...(payer.phone && { phone: String(payer.phone).replace(/\D/g, "") }),
-      },
+      payer: payerData,
     };
 
     const depositRes = await fetch(`${PAGLOOP_BASE}/api/payments/deposit`, {

@@ -60,3 +60,29 @@ export async function createDeposit(
   }
   return data as DepositSuccessResponse;
 }
+
+/** Gera PIX apenas com o valor. Backend preenche payer e external_id. */
+export async function createDepositSimple(amount: number): Promise<DepositSuccessResponse> {
+  const res = await fetch(`${API_BASE}/api/payments/deposit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ amount }),
+  });
+  const raw = await res.text();
+  let data: { error?: string } = {};
+  try {
+    data = raw ? JSON.parse(raw) : {};
+  } catch {
+    data = {};
+  }
+  if (!res.ok) {
+    const msg =
+      typeof data?.error === "string"
+        ? data.error
+        : res.status === 500
+          ? "Erro 500 no servidor."
+          : "Erro ao gerar PIX. Tente novamente.";
+    throw new Error(msg);
+  }
+  return data as DepositSuccessResponse;
+}

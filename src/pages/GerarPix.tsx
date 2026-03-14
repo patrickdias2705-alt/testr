@@ -2,33 +2,14 @@ import { useState } from "react";
 import { Copy, QrCode } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { Button } from "@/components/ui/button";
-import { createDeposit, type QrCodeResponse } from "@/lib/payment-api";
+import { createDepositSimple, type QrCodeResponse } from "@/lib/payment-api";
 import { toast } from "sonner";
-import { vehicles } from "@/data/vehicles";
-
-const formatCPF = (value: string) => {
-  const digits = value.replace(/\D/g, "").slice(0, 11);
-  return digits
-    .replace(/(\d{3})(\d)/, "$1.$2")
-    .replace(/(\d{3})(\d)/, "$1.$2")
-    .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
-};
 
 const GerarPix = () => {
-  const [selectedSlug, setSelectedSlug] = useState<string>(vehicles[0]?.slug || "");
   const [amount, setAmount] = useState("");
-  const [nome, setNome] = useState("");
-  const [cpf, setCpf] = useState("");
-  const [email, setEmail] = useState("");
-  const [telefone, setTelefone] = useState("");
-  const [whatsDestino, setWhatsDestino] = useState("");
   const [loading, setLoading] = useState(false);
-  const [sendingWhats, setSendingWhats] = useState(false);
   const [result, setResult] = useState<QrCodeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  const selectedVehicle = vehicles.find((v) => v.slug === selectedSlug) || vehicles[0];
-  const mainPlan = selectedVehicle?.plans?.[0];
 
   const copyPix = () => {
     if (!result?.qrcode) return;
@@ -47,31 +28,9 @@ const GerarPix = () => {
       setError("Informe um valor válido.");
       return;
     }
-    if (!nome.trim() || nome.trim().length < 2) {
-      setError("Informe o nome.");
-      return;
-    }
-    const doc = cpf.replace(/\D/g, "");
-    if (doc.length !== 11) {
-      setError("CPF inválido (11 dígitos).");
-      return;
-    }
-    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      setError("E-mail inválido.");
-      return;
-    }
     setLoading(true);
     try {
-      const res = await createDeposit({
-        amount: valor,
-        external_id: `gerar-pix-${selectedVehicle?.slug || "sem-veiculo"}-${Date.now()}`,
-        payer: {
-          name: nome.trim(),
-          document: doc,
-          email: email.trim().toLowerCase(),
-          phone: telefone.replace(/\D/g, "") || undefined,
-        },
-      });
+      const res = await createDepositSimple(valor);
       setResult(res.qrCodeResponse);
       toast.success("PIX gerado!");
     } catch (err) {
@@ -82,83 +41,18 @@ const GerarPix = () => {
     }
   };
 
-  const handleSendWhats = async () => {
-    if (!result?.qrcode) {
-      toast.error("Gere o PIX antes de enviar no WhatsApp.");
-      return;
-    }
-    const phone = whatsDestino.replace(/\D/g, "");
-    if (!phone || phone.length < 10) {
-      toast.error("Informe um número de WhatsApp válido com DDD.");
-      return;
-    }
-    setSendingWhats(true);
-    try {
-      let imageUrl: string | undefined;
-      if (selectedVehicle?.coverImage && typeof window !== "undefined") {
-        try {
-          imageUrl = new URL(selectedVehicle.coverImage, window.location.origin).toString();
-        } catch {
-          imageUrl = undefined;
-        }
-      }
-      const total = result.amount
-        ? `R$ ${result.amount.toFixed(2).replace(".", ",")}`
-        : mainPlan?.total || "";
-      const body = {
-        phone: `55${phone}`, // Brasil
-        vehicleName: selectedVehicle?.name,
-        caucao: selectedVehicle?.caucao,
-        weekly: mainPlan?.weekly,
-        total,
-        qrcode: result.qrcode,
-        imageUrl,
-      };
-      const res = await fetch("/api/whatsapp/send-pix", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const msg = typeof data?.error === "string" ? data.error : "Erro ao enviar mensagem no WhatsApp.";
-        toast.error(msg);
-        return;
-      }
-      toast.success("Mensagem enviada no WhatsApp!");
-    } catch (err) {
-      toast.error("Erro inesperado ao enviar WhatsApp.");
-    } finally {
-      setSendingWhats(false);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-background w-full overflow-x-hidden flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-md">
         <h1 className="font-heading font-bold text-xl text-foreground mb-1 flex items-center gap-2">
           <QrCode className="w-6 h-6 text-primary" />
-          Gerar PIX (copia e cola)
+          Gerar PIX
         </h1>
         <p className="text-muted-foreground text-sm mb-6">
-          Escolha o carro, gere o PIX e envie uma mensagem personalizada no WhatsApp. Só quem tem este link pode usar.
+          Informe o valor e gere o PIX para pagamento.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4 mb-6">
-          <div>
-            <label className="text-sm text-muted-foreground block mb-1">Veículo</label>
-            <select
-              value={selectedSlug}
-              onChange={(e) => setSelectedSlug(e.target.value)}
-              className="w-full rounded-lg border border-border bg-card px-4 py-3 text-foreground font-body text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-            >
-              {vehicles.map((v) => (
-                <option key={v.slug} value={v.slug}>
-                  {v.name}
-                </option>
-              ))}
-            </select>
-          </div>
           <div>
             <label className="text-sm text-muted-foreground block mb-1">Valor (R$)</label>
             <input
@@ -167,46 +61,6 @@ const GerarPix = () => {
               value={amount}
               onChange={(e) => setAmount(e.target.value.replace(/[^\d,.]/g, ""))}
               placeholder="Ex: 150,00 ou 1500"
-              className="w-full rounded-lg border border-border bg-card px-4 py-3 text-foreground font-body text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-            />
-          </div>
-          <div>
-            <label className="text-sm text-muted-foreground block mb-1">Nome</label>
-            <input
-              type="text"
-              value={nome}
-              onChange={(e) => setNome(e.target.value)}
-              placeholder="Nome completo"
-              className="w-full rounded-lg border border-border bg-card px-4 py-3 text-foreground font-body text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-            />
-          </div>
-          <div>
-            <label className="text-sm text-muted-foreground block mb-1">CPF</label>
-            <input
-              type="text"
-              value={cpf}
-              onChange={(e) => setCpf(formatCPF(e.target.value))}
-              placeholder="000.000.000-00"
-              className="w-full rounded-lg border border-border bg-card px-4 py-3 text-foreground font-body text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-            />
-          </div>
-          <div>
-            <label className="text-sm text-muted-foreground block mb-1">E-mail</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="email@exemplo.com"
-              className="w-full rounded-lg border border-border bg-card px-4 py-3 text-foreground font-body text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-            />
-          </div>
-          <div>
-            <label className="text-sm text-muted-foreground block mb-1">Telefone (opcional)</label>
-            <input
-              type="text"
-              value={telefone}
-              onChange={(e) => setTelefone(e.target.value.replace(/\D/g, "").slice(0, 11))}
-              placeholder="11999999999"
               className="w-full rounded-lg border border-border bg-card px-4 py-3 text-foreground font-body text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
             />
           </div>
@@ -239,28 +93,8 @@ const GerarPix = () => {
               <Copy className="w-4 h-4" />
               Copiar código PIX (copia e cola)
             </Button>
-            <div className="space-y-2 pt-2 border-t border-border">
-              <label className="text-sm text-muted-foreground block mb-1">
-                Enviar mensagem no WhatsApp para:
-              </label>
-              <input
-                type="text"
-                value={whatsDestino}
-                onChange={(e) => setWhatsDestino(e.target.value)}
-                placeholder="DDD + número (ex: 11999999999)"
-                className="w-full rounded-lg border border-border bg-card px-4 py-3 text-foreground font-body text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-              />
-              <Button
-                type="button"
-                onClick={handleSendWhats}
-                disabled={sendingWhats}
-                className="w-full"
-              >
-                {sendingWhats ? "Enviando..." : "Enviar mensagem com PIX no WhatsApp"}
-              </Button>
-            </div>
             <p className="text-xs text-muted-foreground">
-              Cole no app do banco para pagar. Status: {result.status}.
+              Cole no app do banco para pagar.
             </p>
           </div>
         )}

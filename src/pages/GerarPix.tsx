@@ -2,11 +2,22 @@ import { useState } from "react";
 import { Copy, QrCode } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { Button } from "@/components/ui/button";
-import { createDepositSimple, type QrCodeResponse } from "@/lib/payment-api";
+import { createDeposit, type QrCodeResponse } from "@/lib/payment-api";
 import { toast } from "sonner";
+
+const formatCPF = (value: string) => {
+  const digits = value.replace(/\D/g, "").slice(0, 11);
+  return digits
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
+};
 
 const GerarPix = () => {
   const [amount, setAmount] = useState("");
+  const [nome, setNome] = useState("");
+  const [cpf, setCpf] = useState("");
+  const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<QrCodeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -28,9 +39,30 @@ const GerarPix = () => {
       setError("Informe um valor válido.");
       return;
     }
+    if (!nome.trim() || nome.trim().length < 2) {
+      setError("Informe o nome completo.");
+      return;
+    }
+    const doc = cpf.replace(/\D/g, "");
+    if (doc.length !== 11) {
+      setError("CPF inválido (11 dígitos).");
+      return;
+    }
+    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("E-mail inválido.");
+      return;
+    }
     setLoading(true);
     try {
-      const res = await createDepositSimple(valor);
+      const res = await createDeposit({
+        amount: valor,
+        external_id: `pix-${Date.now()}`,
+        payer: {
+          name: nome.trim(),
+          document: doc,
+          email: email.trim().toLowerCase(),
+        },
+      });
       setResult(res.qrCodeResponse);
       toast.success("PIX gerado!");
     } catch (err) {
@@ -49,7 +81,7 @@ const GerarPix = () => {
           Gerar PIX
         </h1>
         <p className="text-muted-foreground text-sm mb-6">
-          Informe o valor e gere o PIX para pagamento.
+          Preencha com seus dados para o banco identificar o pagamento e evitar bloqueios.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4 mb-6">
@@ -61,6 +93,36 @@ const GerarPix = () => {
               value={amount}
               onChange={(e) => setAmount(e.target.value.replace(/[^\d,.]/g, ""))}
               placeholder="Ex: 150,00 ou 1500"
+              className="w-full rounded-lg border border-border bg-card px-4 py-3 text-foreground font-body text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+            />
+          </div>
+          <div>
+            <label className="text-sm text-muted-foreground block mb-1">Nome completo</label>
+            <input
+              type="text"
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              placeholder="Como está no banco"
+              className="w-full rounded-lg border border-border bg-card px-4 py-3 text-foreground font-body text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+            />
+          </div>
+          <div>
+            <label className="text-sm text-muted-foreground block mb-1">CPF</label>
+            <input
+              type="text"
+              value={cpf}
+              onChange={(e) => setCpf(formatCPF(e.target.value))}
+              placeholder="000.000.000-00"
+              className="w-full rounded-lg border border-border bg-card px-4 py-3 text-foreground font-body text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+            />
+          </div>
+          <div>
+            <label className="text-sm text-muted-foreground block mb-1">E-mail</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="seu@email.com"
               className="w-full rounded-lg border border-border bg-card px-4 py-3 text-foreground font-body text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none"
             />
           </div>
@@ -94,7 +156,7 @@ const GerarPix = () => {
               Copiar código PIX (copia e cola)
             </Button>
             <p className="text-xs text-muted-foreground">
-              Cole no app do banco para pagar.
+              Cole no app do banco para pagar. Use o mesmo nome/CPF do seu banco.
             </p>
           </div>
         )}

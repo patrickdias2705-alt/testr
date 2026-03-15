@@ -1,7 +1,7 @@
 import { useParams, Link } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, Check, ChevronLeft, ChevronRight, Phone, Copy, QrCode } from "lucide-react";
+import { ArrowLeft, Check, ChevronLeft, ChevronRight, Phone, Copy, QrCode, Upload, Loader2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { vehicles } from "@/data/vehicles";
 import Header from "@/components/Header";
@@ -18,6 +18,8 @@ import {
 import { toast } from "sonner";
 import { createDeposit, type QrCodeResponse } from "@/lib/payment-api";
 import type { VehiclePlan } from "@/data/vehicles";
+
+const ANALYZING_SECONDS = 20;
 
 const WHATSAPP_NUMBERS = [
   { label: "(11) 98660-8416", url: "5511986608416" },
@@ -50,22 +52,44 @@ const VehicleDetail = () => {
   const [pixDialogOpen, setPixDialogOpen] = useState(false);
   const [pixError, setPixError] = useState<string | null>(null);
   const [paymentUnlocked, setPaymentUnlocked] = useState(false);
+  const [documentsSent, setDocumentsSent] = useState(false);
+  const [analyzingSecondsLeft, setAnalyzingSecondsLeft] = useState<number | null>(null);
+  const [whatsAppClicked, setWhatsAppClicked] = useState(false);
+  const [docFilesCount, setDocFilesCount] = useState(0);
+  const docsInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [slug]);
 
+  // Timer de 34 segundos "Analisando seus documentos"
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const digits = formData.whatsapp.replace(/\D/g, "");
-    if (digits.length < 10) return;
-    const key = `locarlima_docs_enviados_${digits}`;
-    if (window.localStorage.getItem(key) === "1") {
-      setPaymentUnlocked(true);
-    } else {
-      setPaymentUnlocked(false);
+    if (analyzingSecondsLeft === null || analyzingSecondsLeft <= 0) return;
+    const t = setInterval(() => {
+      setAnalyzingSecondsLeft((s) => (s === null ? null : s <= 1 ? 0 : s - 1));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [analyzingSecondsLeft]);
+
+  useEffect(() => {
+    if (analyzingSecondsLeft === 0) {
+      setAnalyzingSecondsLeft(null);
+      toast.success("Análise concluída! Envie uma mensagem no WhatsApp para saber o processo de aprovação.");
     }
-  }, [formData.whatsapp]);
+  }, [analyzingSecondsLeft]);
+
+  // Quando o usuário volta da aba (ex.: voltou do WhatsApp), libera o PIX
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const onVisibility = () => {
+      if (document.visibilityState === "visible" && whatsAppClicked && !paymentUnlocked) {
+        setPaymentUnlocked(true);
+        toast.success("Documentos recebidos! Você já pode gerar o PIX para pagamento.");
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [whatsAppClicked, paymentUnlocked]);
 
   if (!vehicle) {
     return (
@@ -122,45 +146,34 @@ const VehicleDetail = () => {
     validateForm();
   };
 
-  const handleSendDocsToWhatsApp = () => {
+  const handleEnviarDocumentos = () => {
+    if (!validateForm()) return;
+    if (docFilesCount < 1) {
+      toast.error("Envie a foto da sua CNH para continuar.");
+      return;
+    }
+    setDocumentsSent(true);
+    setAnalyzingSecondsLeft(ANALYZING_SECONDS);
+    toast.info("Documentos enviados! Estamos analisando.");
+  };
+
+  const handleWhatsAppAprovacao = () => {
     if (!validateForm()) return;
     const digits = formData.whatsapp.replace(/\D/g, "");
     if (digits.length < 10) {
       toast.error("Informe um WhatsApp válido para continuar.");
       return;
     }
-
     const randomIndex = Math.floor(Math.random() * WHATSAPP_NUMBERS.length);
     const selected = WHATSAPP_NUMBERS[randomIndex];
-
     const message = encodeURIComponent(
-      `Olá! Fiz meu cadastro no site da Locar Lima e quero enviar meus documentos para análise do veículo ${vehicle?.name}.\n\n` +
-        `Meus dados:\n` +
-        `Nome: ${formData.nome}\n` +
-        `CPF: ${formData.cpf}\n` +
-        `E-mail: ${formData.email}\n` +
-        `WhatsApp: ${formData.whatsapp}\n\n` +
-        `Documentos que vou enviar por aqui:\n` +
-        `1️⃣ Foto da CNH (aberta e legível)\n` +
-        `2️⃣ Comprovante de endereço (até 3 meses)\n` +
-        `3️⃣ Print do app (Uber/99) com minha foto, quantidade de corridas e estrelas\n` +
-        `4️⃣ Foto da frente da residência mostrando a garagem (parte interna e externa)\n` +
-        `5️⃣ Certidão de Pontuação da CNH (site do Detran)\n\n` +
-        `Após a análise, por favor me retorne por aqui.`
+      `Olá! Enviei meus documentos pelo site para análise do veículo ${vehicle?.name}.\n\n` +
+        `Meus dados:\nNome: ${formData.nome}\nCPF: ${formData.cpf}\nE-mail: ${formData.email}\nWhatsApp: ${formData.whatsapp}\n\n` +
+        `Gostaria de saber como está o processo de aprovação. Obrigado!`
     );
-
     window.open(`https://wa.me/${selected.url}?text=${message}`, "_blank");
-
-    try {
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(`locarlima_docs_enviados_${digits}`, "1");
-      }
-    } catch {
-      // ignore storage errors
-    }
-
-    setPaymentUnlocked(true);
-    toast.success("Abrindo o WhatsApp para você enviar os documentos.");
+    setWhatsAppClicked(true);
+    toast.success("Ao voltar para esta página, o botão de PIX será liberado.");
   };
 
   const handleGeneratePix = async () => {
@@ -342,7 +355,7 @@ const VehicleDetail = () => {
               </div>
 
               {/* Contact Form */}
-              <div className="mt-8 rounded-xl border-2 border-border bg-card p-6">
+              <div className="mt-8 rounded-xl border-2 border-border bg-card p-4 sm:p-6 min-w-0 overflow-visible">
                 <h3 className="font-heading font-extrabold text-lg text-foreground mb-4">
                   Quero alugar este veículo
                 </h3>
@@ -395,36 +408,79 @@ const VehicleDetail = () => {
                   {/* Documentos para análise */}
                   <div className="mt-4 space-y-3">
                     <h4 className="font-heading font-semibold text-sm text-foreground">
-                      Envio de documentos para análise
+                      Envio da CNH para análise
                     </h4>
                     <p className="text-xs text-muted-foreground">
-                      Antes de liberar o pagamento via PIX, você precisa enviar os documentos abaixo para um de nossos
-                      consultores no WhatsApp. Clique no botão para ser redirecionado:
+                      Envie aqui apenas a <strong>foto da sua CNH</strong> (frente e verso ou aberta e legível). Clique em Enviar para iniciar a análise.
                     </p>
-                    <ul className="text-xs text-foreground list-disc list-inside space-y-1">
-                      <li>1️⃣ Foto da CNH (aberta e legível)</li>
-                      <li>2️⃣ Comprovante de endereço (até 3 meses)</li>
-                      <li>3️⃣ Print do app (Uber/99) com sua foto, quantidade de corridas e estrelas</li>
-                      <li>4️⃣ Foto da frente da residência mostrando a garagem (parte interna e externa)</li>
-                      <li>5️⃣ Certidão de Pontuação da CNH (site do Detran)</li>
-                      <li>
-                        6️⃣ Seu e-mail para envio do contrato:&nbsp;
-                        <span className="font-semibold">
-                          {formData.email || "preencha seu e-mail acima"}
-                        </span>
-                      </li>
-                    </ul>
+                    <p className="text-xs text-amber-600 dark:text-amber-500 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2 break-words">
+                      No WhatsApp, ao validar seu cadastro, nosso time vai pedir o envio dos outros documentos (comprovante de endereço, print do app, foto da garagem, certidão de pontuação etc.). Por isso, já deixe tudo separado.
+                    </p>
+                    {!documentsSent && (
+                      <div className="rounded-lg border-2 border-dashed border-border bg-muted/30 p-4 text-center">
+                        <input
+                          ref={docsInputRef}
+                          type="file"
+                          multiple
+                          accept="image/*,.pdf"
+                          className="hidden"
+                          id="docs-upload"
+                          onChange={(e) => setDocFilesCount(e.target.files?.length ?? 0)}
+                        />
+                        <label
+                          htmlFor="docs-upload"
+                          className="cursor-pointer flex flex-col items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <Upload className="w-8 h-8" />
+                          <span className="text-sm font-medium">
+                            Clique para enviar a foto da CNH
+                          </span>
+                          <span className="text-xs">
+                            {docFilesCount > 0
+                              ? `${docFilesCount} arquivo(s) selecionado(s)`
+                              : "Nenhum arquivo selecionado"}
+                          </span>
+                        </label>
+                      </div>
+                    )}
                   </div>
                   <div className="flex flex-col gap-3 pt-2">
-                    {!paymentUnlocked && (
+                    {!documentsSent && (
                       <Button
                         type="button"
-                        onClick={handleSendDocsToWhatsApp}
+                        onClick={handleEnviarDocumentos}
                         disabled={submitting}
-                        className="w-full py-5 rounded-full font-heading font-bold uppercase text-sm bg-primary text-primary-foreground hover:shadow-cyan transition-all"
+                        className="w-full min-h-[48px] py-5 rounded-full font-heading font-bold uppercase text-sm bg-primary text-primary-foreground hover:shadow-cyan transition-all whitespace-normal text-center break-words"
                       >
-                        Enviar documentos para análise no WhatsApp
+                        Enviar documentos
                       </Button>
+                    )}
+                    {documentsSent && analyzingSecondsLeft !== null && (
+                      <div className="rounded-xl border-2 border-primary/30 bg-primary/5 p-5 text-center">
+                        <Loader2 className="w-10 h-10 text-primary animate-spin mx-auto mb-2" />
+                        <p className="font-heading font-bold text-foreground">Analisando seus documentos</p>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          Aguarde a conclusão para falar no WhatsApp.
+                        </p>
+                      </div>
+                    )}
+                    {documentsSent && analyzingSecondsLeft === null && !paymentUnlocked && (
+                      <>
+                        <Button
+                          type="button"
+                          onClick={handleWhatsAppAprovacao}
+                          disabled={submitting}
+                          className="w-full min-h-[48px] py-5 px-4 rounded-full font-heading font-bold uppercase text-xs sm:text-sm bg-primary text-primary-foreground hover:shadow-cyan transition-all flex items-center justify-center gap-2 whitespace-normal text-center break-words"
+                        >
+                          <Phone className="w-5 h-5 flex-shrink-0" />
+                          <span>Enviar no WhatsApp e saber processo de aprovação</span>
+                        </Button>
+                        {whatsAppClicked && (
+                          <p className="text-xs text-center text-muted-foreground break-words px-1">
+                            Quando voltar para esta página (após falar no WhatsApp), o botão de PIX será liberado.
+                          </p>
+                        )}
+                      </>
                     )}
                     {paymentUnlocked && (
                       <>
@@ -432,12 +488,12 @@ const VehicleDetail = () => {
                           type="button"
                           onClick={handleGeneratePix}
                           disabled={pixLoading || submitting}
-                          className="w-full py-6 rounded-full font-heading font-bold uppercase text-sm bg-primary text-primary-foreground hover:shadow-cyan transition-all flex items-center justify-center gap-2"
+                          className="w-full min-h-[52px] py-6 px-4 rounded-full font-heading font-bold uppercase text-sm bg-primary text-primary-foreground hover:shadow-cyan transition-all flex items-center justify-center gap-2 whitespace-normal text-center"
                         >
-                          <QrCode className="w-5 h-5" />
+                          <QrCode className="w-5 h-5 flex-shrink-0" />
                           {pixLoading ? "Gerando PIX..." : "Pagar com PIX"}
                         </Button>
-                        <p className="text-[11px] text-muted-foreground text-center">
+                        <p className="text-[11px] text-muted-foreground text-center break-words px-1">
                           Após realizar o pagamento, envie o comprovante no nosso WhatsApp oficial.
                         </p>
                         <Button
@@ -451,10 +507,10 @@ const VehicleDetail = () => {
                               "_blank"
                             )
                           }
-                          className="w-full py-4 rounded-full font-heading font-bold uppercase text-sm border-2 border-primary text-primary hover:bg-primary/10 transition-all flex items-center justify-center gap-2"
+                          className="w-full min-h-[48px] py-4 px-4 rounded-full font-heading font-bold uppercase text-xs sm:text-sm border-2 border-primary text-primary hover:bg-primary/10 transition-all flex items-center justify-center gap-2 whitespace-normal text-center break-words"
                         >
-                          <Phone className="w-4 h-4" />
-                          Enviar comprovante no WhatsApp oficial
+                          <Phone className="w-4 h-4 flex-shrink-0" />
+                          <span>Enviar comprovante no WhatsApp oficial</span>
                         </Button>
                       </>
                     )}
